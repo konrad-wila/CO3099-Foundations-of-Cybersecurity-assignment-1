@@ -1,0 +1,67 @@
+# Compiled Java files
+*.class
+*.jar
+*.war
+*.ear
+
+# Test artifacts
+cw1/test.txt
+cw1/test.txt.cry
+cw1/test.txt.backup
+cw1/aes.key
+cw1/*.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# Python and other language artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+.~*
+*.temp
+
+# Build artifacts
+build/
+dist/
+target/
+bin/
+out/
+
+# Test logs and reports
+/tmp/
+*.log
+*.out
+
+# Environment files
+.env
+.env.local
+
+# Node (if used for any web components)
+node_modules/
+package-lock.json
+yarn.lock
