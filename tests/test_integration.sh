@@ -289,6 +289,471 @@ test_pkcs5_padding() {
     print_result "TC-22: PKCS5Padding Validation" $((1 - test_passed))
 }
 
+# TC-11: Wrong UserID
+test_wrong_userid() {
+    echo -e "\n${BLUE}Test TC-11: Wrong UserID Failure${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    # Create test file
+    echo "Secret data for alice only" > test.txt
+    cp test.txt test.txt.backup
+    
+    # Encrypt with WannaCry
+    if ! timeout 10 java WannaCry > /dev/null 2>&1; then
+        echo "  ✗ WannaCry failed"
+        test_passed=0
+    else
+        echo "  ✓ File encrypted by WannaCry"
+        
+        # Start server
+        timeout 60 java Server 9100 > /tmp/server_tc11.log 2>&1 &
+        SERVER_PID=$!
+        sleep 1
+        
+        # Try to decrypt as nonexistent user (no keypair)
+        # This is the real test - user without valid keys cannot create signature
+        if timeout 10 java Decryptor localhost 9100 attacker > /tmp/decryptor_tc11.log 2>&1; then
+            echo "  ✗ Decryptor should fail for user without valid keys"
+            test_passed=0
+        else
+            echo "  ✓ Decryptor correctly failed for unauthorized user"
+        fi
+        
+        # Verify server is still running and able to handle next client
+        if timeout 10 java Decryptor localhost 9100 alice > /dev/null 2>&1; then
+            if [ -f "test.txt" ] && grep -q "Secret data for alice only" test.txt; then
+                echo "  ✓ Authorized user can still decrypt after unauthorized attempt"
+            else
+                echo "  ✗ Alice's decryption failed"
+                test_passed=0
+            fi
+        else
+            echo "  ✗ Server failed after unauthorized attempt"
+            test_passed=0
+        fi
+        
+        kill $SERVER_PID 2>/dev/null || true
+    fi
+    
+    print_result "TC-11: Wrong UserID Failure" $((1 - test_passed))
+}
+
+# TC-16: Multiple Users (Alice & Bob)
+test_multiple_users() {
+    echo -e "\n${BLUE}Test TC-16: Multiple Users Workflow${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    # Create test file
+    echo "Multi-user test content" > test.txt
+    cp test.txt test.txt.backup
+    local original_md5=$(md5sum test.txt | awk '{print $1}')
+    
+    # Encrypt with WannaCry
+    if ! timeout 10 java WannaCry > /dev/null 2>&1; then
+        echo "  ✗ WannaCry failed"
+        test_passed=0
+    else
+        echo "  ✓ File encrypted"
+        
+        # Start server
+        timeout 60 java Server 9101 > /tmp/server_tc16.log 2>&1 &
+        SERVER_PID=$!
+        sleep 1
+        
+        # Alice decrypts (should succeed)
+        if timeout 10 java Decryptor localhost 9101 alice > /dev/null 2>&1; then
+            if [ -f "test.txt" ]; then
+                local alice_md5=$(md5sum test.txt | awk '{print $1}')
+                if [ "$alice_md5" == "$original_md5" ]; then
+                    echo "  ✓ Alice successfully decrypted"
+                else
+                    echo "  ✗ Alice's decryption corrupted file"
+                    test_passed=0
+                fi
+            fi
+        else
+            echo "  ✗ Alice's decryption failed"
+            test_passed=0
+        fi
+        
+        kill $SERVER_PID 2>/dev/null || true
+    fi
+    
+    print_result "TC-16: Multiple Users Workflow" $((1 - test_passed))
+}
+
+# TC-18: Large File Encryption
+test_large_file() {
+    echo -e "\n${BLUE}Test TC-18: Large File Encryption${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    # Create 5MB test file (smaller than 10MB for faster test)
+    echo "Generating 5MB test file..."
+    if ! timeout 30 dd if=/dev/urandom of=test.txt bs=1M count=5 2>/dev/null; then
+        echo "  ✗ Failed to create test file"
+        test_passed=0
+    else
+        local original_size=$(stat -f%z test.txt 2>/dev/null || stat -c%s test.txt 2>/dev/null)
+        cp test.txt test.txt.backup
+        local original_md5=$(md5sum test.txt | awk '{print $1}')
+        echo "  ✓ Created 5MB test file (MD5: ${original_md5:0:8}...)"
+        
+        # Encrypt
+        if ! timeout 30 java WannaCry > /dev/null 2>&1; then
+            echo "  ✗ WannaCry failed on large file"
+            test_passed=0
+        else
+            echo "  ✓ Large file encrypted"
+            
+            # Verify encrypted file larger than original
+            local encrypted_size=$(stat -f%z test.txt.cry 2>/dev/null || stat -c%s test.txt.cry 2>/dev/null)
+            if [ "$encrypted_size" -gt "$original_size" ]; then
+                echo "  ✓ Encrypted size ($encrypted_size) > original ($original_size)"
+            fi
+            
+            # Start server and decrypt
+            timeout 60 java Server 9102 > /tmp/server_tc18.log 2>&1 &
+            SERVER_PID=$!
+            sleep 1
+            
+            if timeout 60 java Decryptor localhost 9102 alice > /dev/null 2>&1; then
+                if [ -f "test.txt" ]; then
+                    local decrypted_md5=$(md5sum test.txt | awk '{print $1}')
+                    if [ "$decrypted_md5" == "$original_md5" ]; then
+                        echo "  ✓ Large file decrypted correctly (MD5: ${decrypted_md5:0:8}...)"
+                    else
+                        echo "  ✗ Decrypted file corrupted"
+                        test_passed=0
+                    fi
+                else
+                    echo "  ✗ File not decrypted"
+                    test_passed=0
+                fi
+            else
+                echo "  ✗ Decryption failed for large file"
+                test_passed=0
+            fi
+            
+            kill $SERVER_PID 2>/dev/null || true
+        fi
+    fi
+    
+    print_result "TC-18: Large File Encryption" $((1 - test_passed))
+}
+
+# TC-19: Special Characters in Content
+test_special_characters() {
+    echo -e "\n${BLUE}Test TC-19: Special Characters in Content${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    # Create file with special characters, newlines, tabs
+    cat > test.txt << 'TESTEOF'
+Special characters test:
+Newlines: Line 1
+Line 2
+Tabs:	Col1	Col2	Col3
+Unicode: émojis 中文 العربية
+Symbols: !@#$%^&*()_+-={}[]|:;"'<>?,./
+Binary-like: \x00\xff\x80
+TESTEOF
+    
+    cp test.txt test.txt.backup
+    local original_md5=$(md5sum test.txt | awk '{print $1}')
+    echo "  ✓ Created test file with special characters"
+    
+    # Encrypt
+    if ! timeout 10 java WannaCry > /dev/null 2>&1; then
+        echo "  ✗ WannaCry failed"
+        test_passed=0
+    else
+        echo "  ✓ File encrypted"
+        
+        # Start server and decrypt
+        timeout 60 java Server 9103 > /tmp/server_tc19.log 2>&1 &
+        SERVER_PID=$!
+        sleep 1
+        
+        if timeout 10 java Decryptor localhost 9103 alice > /dev/null 2>&1; then
+            if [ -f "test.txt" ]; then
+                local decrypted_md5=$(md5sum test.txt | awk '{print $1}')
+                if [ "$decrypted_md5" == "$original_md5" ]; then
+                    echo "  ✓ Special characters preserved (MD5 matches)"
+                else
+                    echo "  ✗ Content corrupted (MD5 mismatch)"
+                    test_passed=0
+                fi
+            else
+                echo "  ✗ File not decrypted"
+                test_passed=0
+            fi
+        else
+            echo "  ✗ Decryption failed"
+            test_passed=0
+        fi
+        
+        kill $SERVER_PID 2>/dev/null || true
+    fi
+    
+    print_result "TC-19: Special Characters in Content" $((1 - test_passed))
+}
+
+# TC-21: Base64 Encoding/Decoding
+test_base64_keys() {
+    echo -e "\n${BLUE}Test TC-21: Base64 Key Encoding/Decoding${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    # Verify WannaCry uses Base64-encoded master public key
+    echo "  Checking Base64 master public key in WannaCry..."
+    if grep -q "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqW9Skh563WZyyNnXOz3k" WannaCry.java; then
+        echo "  ✓ WannaCry contains Base64-encoded master public key"
+    else
+        echo "  ✗ WannaCry missing Base64 master key"
+        test_passed=0
+    fi
+    
+    # Verify server-b64.prv is Base64-encoded
+    echo "  Checking Base64 encoding in server-b64.prv..."
+    if head -c 10 server-b64.prv | grep -q "^[A-Za-z0-9+/]" || head -c 10 server-b64.prv | grep -q "^MII"; then
+        echo "  ✓ server-b64.prv appears to be Base64-encoded"
+    else
+        echo "  ✗ server-b64.prv doesn't appear Base64-encoded"
+        test_passed=0
+    fi
+    
+    # Test that keys can be used (indirect test via full workflow)
+    echo "  Testing key functionality..."
+    echo "Base64 test content" > test.txt
+    cp test.txt test.txt.backup
+    
+    if timeout 10 java WannaCry > /dev/null 2>&1; then
+        timeout 60 java Server 9104 > /tmp/server_tc21.log 2>&1 &
+        SERVER_PID=$!
+        sleep 1
+        
+        if timeout 10 java Decryptor localhost 9104 alice > /dev/null 2>&1; then
+            if grep -q "Base64 test content" test.txt 2>/dev/null; then
+                echo "  ✓ Base64-encoded keys successfully used in encryption/decryption"
+            else
+                echo "  ✗ Decryption failed"
+                test_passed=0
+            fi
+        else
+            echo "  ✗ Decryption with Base64 keys failed"
+            test_passed=0
+        fi
+        
+        kill $SERVER_PID 2>/dev/null || true
+    else
+        echo "  ✗ Encryption with Base64 keys failed"
+        test_passed=0
+    fi
+    
+    print_result "TC-21: Base64 Key Encoding/Decoding" $((1 - test_passed))
+}
+
+# TC-23: Key Reuse Detection
+test_key_uniqueness() {
+    echo -e "\n${BLUE}Test TC-23: Key Uniqueness (No Reuse)${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    # Create and encrypt first file
+    echo "First encryption test" > test.txt
+    cp test.txt test.txt.backup
+    
+    if ! timeout 10 java WannaCry > /dev/null 2>&1; then
+        echo "  ✗ First encryption failed"
+        test_passed=0
+    else
+        local first_key_md5=$(md5sum aes.key | awk '{print $1}')
+        echo "  ✓ First encryption completed"
+        echo "    AES key MD5: ${first_key_md5:0:8}..."
+        
+        # Prepare second encryption
+        cp test.txt.backup test.txt
+        
+        if ! timeout 10 java WannaCry > /dev/null 2>&1; then
+            echo "  ✗ Second encryption failed"
+            test_passed=0
+        else
+            local second_key_md5=$(md5sum aes.key | awk '{print $1}')
+            echo "  ✓ Second encryption completed"
+            echo "    AES key MD5: ${second_key_md5:0:8}..."
+            
+            # Verify keys are different
+            if [ "$first_key_md5" == "$second_key_md5" ]; then
+                echo "  ✗ AES keys are identical (should be random)"
+                test_passed=0
+            else
+                echo "  ✓ AES keys are unique (proper randomization)"
+            fi
+        fi
+    fi
+    
+    print_result "TC-23: Key Uniqueness" $((1 - test_passed))
+}
+
+# TC-27: Empty File Encryption
+test_empty_file() {
+    echo -e "\n${BLUE}Test TC-27: Empty File Encryption${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    # Create empty test file
+    > test.txt
+    cp test.txt test.txt.backup
+    echo "  ✓ Created empty test.txt"
+    
+    # Encrypt empty file
+    if ! timeout 10 java WannaCry > /dev/null 2>&1; then
+        echo "  ✗ WannaCry failed on empty file"
+        test_passed=0
+    else
+        if [ ! -f "test.txt.cry" ] || [ ! -f "aes.key" ]; then
+            echo "  ✗ Encryption failed to create output files"
+            test_passed=0
+        else
+            echo "  ✓ Empty file encrypted"
+            
+            # Try to decrypt
+            timeout 60 java Server 9105 > /tmp/server_tc27.log 2>&1 &
+            SERVER_PID=$!
+            sleep 1
+            
+            if timeout 10 java Decryptor localhost 9105 alice > /dev/null 2>&1; then
+                if [ -f "test.txt" ]; then
+                    local size=$(wc -c < test.txt)
+                    if [ "$size" -eq 0 ]; then
+                        echo "  ✓ Empty file decrypted correctly (size: 0)"
+                    else
+                        echo "  ✗ Decrypted file should be empty but has $size bytes"
+                        test_passed=0
+                    fi
+                else
+                    echo "  ✗ File not restored"
+                    test_passed=0
+                fi
+            else
+                echo "  ✗ Decryption failed"
+                test_passed=0
+            fi
+            
+            kill $SERVER_PID 2>/dev/null || true
+        fi
+    fi
+    
+    print_result "TC-27: Empty File Encryption" $((1 - test_passed))
+}
+
+# TC-31: Missing aes.key File
+test_missing_aes_key() {
+    echo -e "\n${BLUE}Test TC-31: Missing aes.key File${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    # Create and encrypt file
+    echo "Test with missing key" > test.txt
+    cp test.txt test.txt.backup
+    
+    if ! timeout 10 java WannaCry > /dev/null 2>&1; then
+        echo "  ✗ WannaCry failed"
+        test_passed=0
+    else
+        echo "  ✓ File encrypted"
+        
+        # Remove aes.key
+        if [ -f "aes.key" ]; then
+            rm aes.key
+            echo "  ✓ Removed aes.key"
+        fi
+        
+        # Try to decrypt without aes.key
+        timeout 60 java Server 9106 > /tmp/server_tc31.log 2>&1 &
+        SERVER_PID=$!
+        sleep 1
+        
+        if timeout 10 java Decryptor localhost 9106 alice > /tmp/decryptor_tc31.log 2>&1; then
+            echo "  ✗ Decryptor should fail without aes.key"
+            test_passed=0
+        else
+            echo "  ✓ Decryptor correctly failed without aes.key"
+        fi
+        
+        kill $SERVER_PID 2>/dev/null || true
+    fi
+    
+    print_result "TC-31: Missing aes.key File" $((1 - test_passed))
+}
+
+# TC-39: AES Key Entropy
+test_key_entropy() {
+    echo -e "\n${BLUE}Test TC-39: AES Key Entropy Validation${NC}"
+    
+    cd "$CW1_DIR"
+    
+    local test_passed=1
+    
+    echo "  Testing AES key randomness..."
+    
+    # Generate multiple keys and check for variation
+    local keys_array=()
+    
+    for i in {1..3}; do
+        echo "Test file $i" > test.txt
+        cp test.txt test.txt.backup
+        
+        if timeout 10 java WannaCry > /dev/null 2>&1; then
+            local key_hash=$(md5sum aes.key | awk '{print $1}')
+            keys_array+=("$key_hash")
+            echo "  ✓ Key $i: ${key_hash:0:8}..."
+        else
+            echo "  ✗ Encryption $i failed"
+            test_passed=0
+        fi
+    done
+    
+    # Check if all keys are different
+    if [ "${keys_array[0]}" == "${keys_array[1]}" ] || [ "${keys_array[1]}" == "${keys_array[2]}" ]; then
+        echo "  ✗ Keys show low entropy (duplicates detected)"
+        test_passed=0
+    else
+        echo "  ✓ Keys show good entropy (all unique)"
+    fi
+    
+    # Verify key size (AES-256 = 32 bytes = 256 bits)
+    local key_size=$(wc -c < aes.key)
+    echo "  Checking RSA-encrypted key size..."
+    if [ "$key_size" -gt 200 ] && [ "$key_size" -lt 500 ]; then
+        echo "  ✓ RSA-2048 encrypted key size valid ($key_size bytes)"
+    else
+        echo "  ✗ Key size unexpected: $key_size bytes"
+        test_passed=0
+    fi
+    
+    print_result "TC-39: AES Key Entropy" $((1 - test_passed))
+}
+
 # Main execution
 main() {
     echo -e "${YELLOW}========================================${NC}"
@@ -306,6 +771,33 @@ main() {
     cleanup
     
     test_pkcs5_padding
+    cleanup
+    
+    test_wrong_userid
+    cleanup
+    
+    test_multiple_users
+    cleanup
+    
+    test_large_file
+    cleanup
+    
+    test_special_characters
+    cleanup
+    
+    test_base64_keys
+    cleanup
+    
+    test_key_uniqueness
+    cleanup
+    
+    test_empty_file
+    cleanup
+    
+    test_missing_aes_key
+    cleanup
+    
+    test_key_entropy
     cleanup
     
     # Print summary

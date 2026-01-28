@@ -29,38 +29,29 @@ public class Decryptor {
         userid = args[2];
         
         try {
-            // Display greeting message
-            System.out.println("Dear customer, thank you for purchasing this software.");
-            System.out.println("We are here to help you recover your files from this horrible attack.");
-            System.out.println("Trying to decrypt files...");
             
-            // Step 1: Read encrypted AES key from aes.key
+            // Read encrypted AES key from aes.key
             byte[] encryptedAesKey = Files.readAllBytes(Paths.get("aes.key"));
             
-            // Step 2: Generate signature using userid and encrypted AES key
+            // Generate signature using userid and encrypted AES key
             PrivateKey userPrivateKey = loadUserPrivateKey(userid);
             byte[] signature = generateSignature(userid, encryptedAesKey, userPrivateKey);
             
-            // Step 3: Connect to server and send request
+            // Connect to server and send request
             byte[] decryptedAesKey = connectToServerAndGetKey(hostname, port, userid, encryptedAesKey, signature);
             
             if (decryptedAesKey == null || decryptedAesKey.length == 0) {
-                System.out.println("Unfortunately we cannot verify your identity.");
-                System.out.println("Please try again, making sure that you have the correct signature");
-                System.out.println("key in place and have entered the correct userid.");
+                printIdentityError();
                 System.exit(1);
             }
             
-            // Step 4: Decrypt test.txt.cry with received AES key
+            // Decrypt test.txt.cry with received AES key
             decryptFile("test.txt.cry", "test.txt", decryptedAesKey);
             
-            // Step 5: Display success message
-            System.out.println("Success! Your files have now been recovered!");
+            System.out.println("Success! Files  recovered");
             
         } catch (Exception e) {
-            System.out.println("Unfortunately we cannot verify your identity.");
-            System.out.println("Please try again, making sure that you have the correct signature");
-            System.out.println("key in place and have entered the correct userid.");
+            printIdentityError();
             System.exit(1);
         }
     }
@@ -136,7 +127,12 @@ public class Decryptor {
             socket.close();
         }
     }
-    
+    private static void printIdentityError() {
+        System.out.println("Unfortunately we cannot verify your identity.");
+        System.out.println("Please try again, making sure that you have the correct signature");
+        System.out.println("key in place and have entered the correct userid.");
+    }
+
     /**
      * Decrypt file using AES key (256-bit, CBC mode, PKCS5Padding, zero IV)
      */

