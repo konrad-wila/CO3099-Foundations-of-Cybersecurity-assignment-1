@@ -108,6 +108,7 @@ public class Server {
             
         } catch (Exception e) {
             System.err.println("Error handling client: " + e.getMessage());
+            e.printStackTrace();
         }
     }
     
@@ -119,6 +120,10 @@ public class Server {
         try {
             // Load user's public key
             PublicKey userPublicKey = loadUserPublicKey(userid);
+            
+            if (userPublicKey == null) {
+                return false;
+            }
             
             // Create the data that was signed: userid + encryptedAesKey
             ByteArrayOutputStream baos = new ByteArrayOutputStream();

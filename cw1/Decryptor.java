@@ -10,7 +10,6 @@ import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.Signature;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.util.Base64;
 
 public class Decryptor {
     
@@ -48,9 +47,10 @@ public class Decryptor {
             // Decrypt test.txt.cry with received AES key
             decryptFile("test.txt.cry", "test.txt", decryptedAesKey);
             
-            System.out.println("Success! Files  recovered");
+            System.out.println("Success! File recovered");
             
         } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
             printIdentityError();
             System.exit(1);
         }
@@ -94,11 +94,10 @@ public class Decryptor {
      */
     private static byte[] connectToServerAndGetKey(String hostname, int port, String userid, 
                                                      byte[] encryptedAesKey, byte[] signature) throws Exception {
-        Socket socket = new Socket(hostname, port);
-        DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
-        DataInputStream dis = new DataInputStream(socket.getInputStream());
-        
-        try {
+        try (Socket socket = new Socket(hostname, port);
+             DataOutputStream dos = new DataOutputStream(socket.getOutputStream());
+             DataInputStream dis = new DataInputStream(socket.getInputStream())) {
+            
             // Send userid
             dos.writeUTF(userid);
             
@@ -122,9 +121,6 @@ public class Decryptor {
             dis.readFully(decryptedAesKey);
             
             return decryptedAesKey;
-            
-        } finally {
-            socket.close();
         }
     }
     private static void printIdentityError() {
@@ -144,7 +140,7 @@ public class Decryptor {
         
         // Create IV with 16 zero bytes (same as encryption)
         byte[] iv = new byte[16];
-        IvParameterSpec ivSpec = new IvParameterSpec(iv);
+        IvParameterSpec ivSpec = new IvPara
         
         cipher.init(Cipher.DECRYPT_MODE, aesKey, ivSpec);
         
@@ -154,9 +150,7 @@ public class Decryptor {
         // Decrypt data
         byte[] decryptedData = cipher.doFinal(encryptedData);
         
-        // Write to output file
-        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
-            fos.write(decryptedData);
-        }
+        // Write decrypted data to output file
+        Files.write(Paths.get(outputFile), decryptedData);
     }
 }

