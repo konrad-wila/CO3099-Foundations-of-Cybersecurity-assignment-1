@@ -17,6 +17,10 @@ NC='\033[0m' # No Color
 PASSED=0
 FAILED=0
 
+# Global server variables
+GLOBAL_SERVER_PID=""
+GLOBAL_SERVER_PORT=9200
+
 # Helper function to print test results
 print_result() {
     local test_name=$1
@@ -30,14 +34,36 @@ print_result() {
     fi
 }
 
+# Start global server for shared tests
+start_global_server() {
+    echo -e "${YELLOW}Starting global server on port ${GLOBAL_SERVER_PORT}...${NC}"
+    cd "$CW1_DIR"
+    
+    timeout 300 java Server $GLOBAL_SERVER_PORT > /tmp/server_integration_global.log 2>&1 &
+    GLOBAL_SERVER_PID=$!
+    sleep 2
+    
+    if ! kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
+        echo -e "${RED}✗ Failed to start global server${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Global server started (PID: $GLOBAL_SERVER_PID)${NC}"
+}
+
+# Stop global server
+stop_global_server() {
+    if [ -n "$GLOBAL_SERVER_PID" ]; then
+        echo -e "${YELLOW}Stopping global server...${NC}"
+        kill $GLOBAL_SERVER_PID 2>/dev/null || true
+    fi
+}
+
 # Cleanup
 cleanup() {
     echo -e "${YELLOW}Cleaning up...${NC}"
     cd "$CW1_DIR"
     
-    # Kill any lingering server processes
-    pkill -f "java Server" 2>/dev/null || true
-    sleep 1
+    # Clean up test artifacts (do NOT kill global server)
     
     # Clean up test artifacts
     rm -f test.txt.cry aes.key test.txt
@@ -81,21 +107,18 @@ test_full_workflow() {
         test_passed=0
     fi
     
-    # Step 3: Start server
-    echo -e "\n  Starting server on port 9050..."
-    timeout 60 java Server 9050 > /tmp/server_tc15.log 2>&1 &
-    SERVER_PID=$!
-    sleep 2
+    # Step 3: Use global server
+    echo -e "\n  Using global server (port $GLOBAL_SERVER_PORT)..."
     
-    if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo "  ✗ Server failed to start"
+    if ! kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
+        echo "  ✗ Global server not running"
         test_passed=0
     else
-        echo "  ✓ Server started (PID: $SERVER_PID)"
+        echo "  ✓ Server ready (PID: $GLOBAL_SERVER_PID)"
         
         # Step 4: Run decryptor
         echo -e "\n  Running Decryptor with userid 'alice'..."
-        if timeout 10 java Decryptor localhost 9050 alice > /tmp/decryptor_tc15.log 2>&1; then
+        if timeout 10 java Decryptor localhost $GLOBAL_SERVER_PORT alice > /tmp/decryptor_tc15.log 2>&1; then
             echo "  ✓ Decryptor completed"
             
             # Step 5: Verify decrypted file
@@ -136,9 +159,6 @@ test_full_workflow() {
         fi
     fi
     
-    # Cleanup server
-    kill $SERVER_PID 2>/dev/null || true
-    
     print_result "TC-15: Full Workflow" $((1 - test_passed))
 }
 
@@ -168,11 +188,10 @@ test_decryption_correctness() {
         echo "  ✓ File encrypted"
         
         # Start server and decrypt
-        timeout 60 java Server 9051 > /tmp/server_tc17.log 2>&1 &
-        SERVER_PID=$!
-        sleep 1
         
-        if timeout 10 java Decryptor localhost 9051 alice > /dev/null 2>&1; then
+        
+        
+        if timeout 10 java Decryptor localhost $GLOBAL_SERVER_PORT alice > /dev/null 2>&1; then
             if [ -f "test.txt" ]; then
                 local decrypted_md5=$(md5sum test.txt | awk '{print $1}')
                 local decrypted_sha256=$(sha256sum test.txt | awk '{print $1}')
@@ -196,7 +215,6 @@ test_decryption_correctness() {
             test_passed=0
         fi
         
-        kill $SERVER_PID 2>/dev/null || true
     fi
     
     print_result "TC-17: AES Decryption Correctness" $((1 - test_passed))
@@ -220,11 +238,10 @@ test_iv_validation() {
         test_passed=0
     else
         # Check that we can decrypt - if IV is wrong, decryption will fail
-        timeout 60 java Server 9052 > /tmp/server_tc20.log 2>&1 &
-        SERVER_PID=$!
-        sleep 1
         
-        if timeout 10 java Decryptor localhost 9052 alice > /dev/null 2>&1; then
+        
+        
+        if timeout 10 java Decryptor localhost $GLOBAL_SERVER_PORT alice > /dev/null 2>&1; then
             if [ -f "test.txt" ] && grep -q "IV test content" test.txt; then
                 echo "  ✓ Decryption successful with zero IV"
             else
@@ -236,7 +253,6 @@ test_iv_validation() {
             test_passed=0
         fi
         
-        kill $SERVER_PID 2>/dev/null || true
     fi
     
     print_result "TC-20: IV Validation" $((1 - test_passed))
@@ -259,11 +275,10 @@ test_pkcs5_padding() {
         echo "  ✗ WannaCry failed"
         test_passed=0
     else
-        timeout 60 java Server 9053 > /tmp/server_tc22.log 2>&1 &
-        SERVER_PID=$!
-        sleep 1
         
-        if timeout 10 java Decryptor localhost 9053 alice > /dev/null 2>&1; then
+        
+        
+        if timeout 10 java Decryptor localhost $GLOBAL_SERVER_PORT alice > /dev/null 2>&1; then
             if [ -f "test.txt" ]; then
                 local content=$(cat test.txt)
                 if [ "$content" == "This is exactly 25 chars" ]; then
@@ -283,7 +298,6 @@ test_pkcs5_padding() {
             test_passed=0
         fi
         
-        kill $SERVER_PID 2>/dev/null || true
     fi
     
     print_result "TC-22: PKCS5Padding Validation" $((1 - test_passed))
@@ -310,8 +324,7 @@ test_wrong_userid() {
         
         # Start server
         timeout 60 java Server 9100 > /tmp/server_tc11.log 2>&1 &
-        SERVER_PID=$!
-        sleep 1
+        
         
         # Try to decrypt as nonexistent user (no keypair)
         # This is the real test - user without valid keys cannot create signature
@@ -335,7 +348,6 @@ test_wrong_userid() {
             test_passed=0
         fi
         
-        kill $SERVER_PID 2>/dev/null || true
     fi
     
     print_result "TC-11: Wrong UserID Failure" $((1 - test_passed))
@@ -363,8 +375,7 @@ test_multiple_users() {
         
         # Start server
         timeout 60 java Server 9101 > /tmp/server_tc16.log 2>&1 &
-        SERVER_PID=$!
-        sleep 1
+        
         
         # Alice decrypts (should succeed)
         if timeout 10 java Decryptor localhost 9101 alice > /dev/null 2>&1; then
@@ -382,7 +393,6 @@ test_multiple_users() {
             test_passed=0
         fi
         
-        kill $SERVER_PID 2>/dev/null || true
     fi
     
     print_result "TC-16: Multiple Users Workflow" $((1 - test_passed))
@@ -422,8 +432,7 @@ test_large_file() {
             
             # Start server and decrypt
             timeout 60 java Server 9102 > /tmp/server_tc18.log 2>&1 &
-            SERVER_PID=$!
-            sleep 1
+            
             
             if timeout 60 java Decryptor localhost 9102 alice > /dev/null 2>&1; then
                 if [ -f "test.txt" ]; then
@@ -443,7 +452,6 @@ test_large_file() {
                 test_passed=0
             fi
             
-            kill $SERVER_PID 2>/dev/null || true
         fi
     fi
     
@@ -482,8 +490,7 @@ TESTEOF
         
         # Start server and decrypt
         timeout 60 java Server 9103 > /tmp/server_tc19.log 2>&1 &
-        SERVER_PID=$!
-        sleep 1
+        
         
         if timeout 10 java Decryptor localhost 9103 alice > /dev/null 2>&1; then
             if [ -f "test.txt" ]; then
@@ -503,7 +510,6 @@ TESTEOF
             test_passed=0
         fi
         
-        kill $SERVER_PID 2>/dev/null || true
     fi
     
     print_result "TC-19: Special Characters in Content" $((1 - test_passed))
@@ -542,8 +548,7 @@ test_base64_keys() {
     
     if timeout 10 java WannaCry > /dev/null 2>&1; then
         timeout 60 java Server 9104 > /tmp/server_tc21.log 2>&1 &
-        SERVER_PID=$!
-        sleep 1
+        
         
         if timeout 10 java Decryptor localhost 9104 alice > /dev/null 2>&1; then
             if grep -q "Base64 test content" test.txt 2>/dev/null; then
@@ -557,7 +562,6 @@ test_base64_keys() {
             test_passed=0
         fi
         
-        kill $SERVER_PID 2>/dev/null || true
     else
         echo "  ✗ Encryption with Base64 keys failed"
         test_passed=0
@@ -636,8 +640,7 @@ test_empty_file() {
             
             # Try to decrypt
             timeout 60 java Server 9105 > /tmp/server_tc27.log 2>&1 &
-            SERVER_PID=$!
-            sleep 1
+            
             
             if timeout 10 java Decryptor localhost 9105 alice > /dev/null 2>&1; then
                 if [ -f "test.txt" ]; then
@@ -657,7 +660,6 @@ test_empty_file() {
                 test_passed=0
             fi
             
-            kill $SERVER_PID 2>/dev/null || true
         fi
     fi
     
@@ -690,8 +692,7 @@ test_missing_aes_key() {
         
         # Try to decrypt without aes.key
         timeout 60 java Server 9106 > /tmp/server_tc31.log 2>&1 &
-        SERVER_PID=$!
-        sleep 1
+        
         
         if timeout 10 java Decryptor localhost 9106 alice > /tmp/decryptor_tc31.log 2>&1; then
             echo "  ✗ Decryptor should fail without aes.key"
@@ -700,7 +701,6 @@ test_missing_aes_key() {
             echo "  ✓ Decryptor correctly failed without aes.key"
         fi
         
-        kill $SERVER_PID 2>/dev/null || true
     fi
     
     print_result "TC-31: Missing aes.key File" $((1 - test_passed))
@@ -761,6 +761,9 @@ main() {
     echo -e "${YELLOW}Full Workflow Tests${NC}"
     echo -e "${YELLOW}========================================${NC}"
     
+    # Start global server once for all tests
+    start_global_server
+    
     test_full_workflow
     cleanup
     
@@ -799,6 +802,9 @@ main() {
     
     test_key_entropy
     cleanup
+    
+    # Stop global server at the end
+    stop_global_server
     
     # Print summary
     echo -e "\n${YELLOW}========================================${NC}"

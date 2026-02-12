@@ -130,7 +130,7 @@ public class Decryptor {
     }
 
     /**
-     * Decrypt file using AES key (256-bit, CBC mode, PKCS5Padding, zero IV)
+     * Decrypt file using AES key
      */
     private static void decryptFile(String inputFile, String outputFile, byte[] aesKeyBytes) throws Exception {
         // Create AES secret key from bytes
@@ -140,7 +140,7 @@ public class Decryptor {
         
         // Create IV with 16 zero bytes (same as encryption)
         byte[] iv = new byte[16];
-        IvParameterSpec ivSpec = new IvPara
+        IvParameterSpec ivSpec = new IvParameterSpec(iv);
         
         cipher.init(Cipher.DECRYPT_MODE, aesKey, ivSpec);
         

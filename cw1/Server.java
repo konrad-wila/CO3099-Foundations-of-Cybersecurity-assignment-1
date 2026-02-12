@@ -13,7 +13,6 @@ import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
 
 public class Server {
-    
     private static int port;
     private static PrivateKey masterPrivateKey;
     
@@ -33,19 +32,34 @@ public class Server {
     }
     
     /**
-     * Load master RSA private key from Base64-encoded file
+     * Load master RSA private key from file
      */
     private static void loadMasterPrivateKey() throws Exception {
-        // Read the Base64-encoded private key from file
-        String keyContent = Files.readString(Paths.get("server-b64.prv")).trim();
-        
-        // Decode Base64
-        byte[] decodedKey = Base64.getDecoder().decode(keyContent);
-        
-        // Create key spec and generate private key
-        PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(decodedKey);
-        KeyFactory keyFactory = KeyFactory.getInstance("RSA");
-        masterPrivateKey = keyFactory.generatePrivate(keySpec);
+        String keyFileName = "server-b64.prv";
+
+        if (!Files.exists(Paths.get(keyFileName))) {
+            System.err.println(
+                "[ERROR] Master private key file '" + keyFileName + "' not found.\n" +
+                "Please ensure the file is present in the current directory before starting the server."
+            );
+            System.exit(1);
+        }
+
+        try {
+            // Read the private key from file
+            String keyContent = Files.readString(Paths.get(keyFileName)).trim();
+            
+            // Decode Base64
+            byte[] decodedKey = Base64.getDecoder().decode(keyContent);
+            
+            // Create key spec and generate private key
+            PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(decodedKey);
+            KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+            masterPrivateKey = keyFactory.generatePrivate(keySpec);
+        } catch (Exception e) {
+            System.err.println("[ERROR] Failed to load server private key: " + e.getMessage());
+            System.exit(1);
+        }
     }
     
     /**
@@ -114,7 +128,7 @@ public class Server {
     
     /**
      * Verify signature using user's public key
-     * The signature is over the userid and encrypted AES key
+     * The signature is the userid and the encrypted AES key
      */
     private static boolean verifySignature(String userid, byte[] encryptedAesKey, byte[] signature) throws Exception {
         try {
@@ -145,12 +159,12 @@ public class Server {
     }
     
     /**
-     * Load user's public key from userid.pub file (binary X.509 format)
+     * Load user's public key from userid.pub file (binary encoded key)
      */
     private static PublicKey loadUserPublicKey(String userid) throws Exception {
         String keyFileName = userid + ".pub";
         
-        // Read binary X.509 encoded key
+        // Read binary encoded key
         byte[] keyBytes = Files.readAllBytes(Paths.get(keyFileName));
         X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");

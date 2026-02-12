@@ -16,6 +16,10 @@ NC='\033[0m' # No Color
 PASSED=0
 FAILED=0
 
+# Global server variables
+GLOBAL_SERVER_PID=""
+GLOBAL_SERVER_PORT=9000
+
 # Helper function to print test results
 print_result() {
     local test_name=$1
@@ -45,13 +49,36 @@ setup() {
     fi
 }
 
+# Start global server for shared tests
+start_global_server() {
+    echo -e "${YELLOW}Starting global server on port ${GLOBAL_SERVER_PORT}...${NC}"
+    cd "$CW1_DIR"
+    
+    timeout 180 java Server $GLOBAL_SERVER_PORT > /tmp/server_global.log 2>&1 &
+    GLOBAL_SERVER_PID=$!
+    sleep 2
+    
+    if ! kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
+        echo -e "${RED}✗ Failed to start global server${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Global server started (PID: $GLOBAL_SERVER_PID)${NC}"
+}
+
+# Stop global server
+stop_global_server() {
+    if [ -n "$GLOBAL_SERVER_PID" ]; then
+        echo -e "${YELLOW}Stopping global server...${NC}"
+        kill $GLOBAL_SERVER_PID 2>/dev/null || true
+        sleep 1
+    fi
+}
+
 # Cleanup
 cleanup() {
     echo -e "${YELLOW}Cleaning up Server test artifacts...${NC}"
     
-    # Kill any lingering server processes
-    pkill -f "java Server" || true
-    sleep 1
+    # Note: Server cleanup is handled by stop_global_server() and individual test servers
 }
 
 # TC-4: Valid Signature Verification
@@ -62,27 +89,21 @@ test_valid_signature() {
     
     local test_passed=1
     
-    # Start server
-    timeout 30 java Server 9001 > /tmp/server_tc4.log 2>&1 &
-    SERVER_PID=$!
-    sleep 1
-    
-    if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo "  ✗ Server failed to start"
+    # Use global server
+    if ! kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
+        echo "  ✗ Global server not running"
         test_passed=0
     else
         echo "  ✓ Server started successfully"
         
         # Check server is listening
-        if timeout 5 bash -c "echo '' > /dev/tcp/localhost/9001" 2>/dev/null; then
-            echo "  ✓ Server is listening on port 9001"
+        if timeout 5 bash -c "echo '' > /dev/tcp/localhost/$GLOBAL_SERVER_PORT" 2>/dev/null; then
+            echo "  ✓ Server is listening on port $GLOBAL_SERVER_PORT"
         else
             echo "  ✗ Server not listening"
             test_passed=0
         fi
     fi
-    
-    kill $SERVER_PID 2>/dev/null || true
     
     print_result "TC-4: Valid Signature Verification" $((1 - test_passed))
 }
@@ -95,24 +116,22 @@ test_invalid_signature() {
     
     local test_passed=1
     
-    # Create a test that sends tampered data
-    # Start server
-    timeout 60 java Server 9006 > /tmp/server_tc5.log 2>&1 &
-    SERVER_PID=$!
-    sleep 1
-    
-    if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo "  ✗ Server failed to start"
+    # Use global server
+    if ! kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
+        echo "  ✗ Global server not running"
         test_passed=0
     else
         echo "  ✓ Server started successfully"
         
+        # Clear previous log entries and get current log size
+        local log_start=$(wc -l < /tmp/server_global.log 2>/dev/null || echo 0)
+        
         # Try connecting with non-existent userid (signature will fail)
-        timeout 10 java Decryptor localhost 9006 nonexistent > /dev/null 2>&1 || true
+        timeout 10 java Decryptor localhost $GLOBAL_SERVER_PORT nonexistent > /dev/null 2>&1 || true
         sleep 1
         
         # Check if server output contains "Signature not verified"
-        local server_output=$(cat /tmp/server_tc5.log)
+        local server_output=$(tail -n +$((log_start + 1)) /tmp/server_global.log 2>/dev/null)
         
         if echo "$server_output" | grep -q "Signature not verified"; then
             echo "  ✓ Output contains 'Signature not verified' message"
@@ -122,15 +141,13 @@ test_invalid_signature() {
         fi
         
         # Verify server is still running after failed verification
-        if kill -0 $SERVER_PID 2>/dev/null; then
+        if kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
             echo "  ✓ Server still running after signature verification failure"
         else
             echo "  ✗ Server crashed after failed signature"
             test_passed=0
         fi
     fi
-    
-    kill $SERVER_PID 2>/dev/null || true
     
     print_result "TC-5: Invalid Signature" $((1 - test_passed))
 }
@@ -217,26 +234,22 @@ test_multiple_clients() {
     
     local test_passed=1
     
-    # Start server
-    timeout 60 java Server 9004 > /tmp/server_tc6.log 2>&1 &
-    SERVER_PID=$!
-    sleep 1
-    
-    if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo "  ✗ Server failed to start"
+    # Use global server
+    if ! kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
+        echo "  ✗ Global server not running"
         test_passed=0
     else
         echo "  ✓ Server started successfully"
         
         # Try first client (alice)
-        if timeout 10 java Decryptor localhost 9004 alice > /dev/null 2>&1; then
+        if timeout 10 java Decryptor localhost $GLOBAL_SERVER_PORT alice > /dev/null 2>&1; then
             echo "  ✓ First client (alice) handled"
         else
             echo "  ✗ First client failed"
         fi
         
         # Check server still running
-        if kill -0 $SERVER_PID 2>/dev/null; then
+        if kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
             echo "  ✓ Server still running after first client"
         else
             echo "  ✗ Server crashed after first client"
@@ -244,18 +257,16 @@ test_multiple_clients() {
         fi
         
         # Try second client (bob) - would fail due to signature but server should handle
-        timeout 10 java Decryptor localhost 9004 bob > /dev/null 2>&1 || true
+        timeout 10 java Decryptor localhost $GLOBAL_SERVER_PORT bob > /dev/null 2>&1 || true
         
         # Check server still running
-        if kill -0 $SERVER_PID 2>/dev/null; then
+        if kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
             echo "  ✓ Server still running after second client"
         else
             echo "  ✗ Server crashed after second client"
             test_passed=0
         fi
     fi
-    
-    kill $SERVER_PID 2>/dev/null || true
     
     print_result "TC-6: Multiple Sequential Clients" $((1 - test_passed))
 }
@@ -268,31 +279,22 @@ test_server_output_format() {
     
     local test_passed=1
     
-    # Start server and capture output
-    timeout 60 java Server 9005 > /tmp/server_tc7.log 2>&1 &
-    SERVER_PID=$!
-    sleep 1
-    
-    if ! kill -0 $SERVER_PID 2>/dev/null; then
-        echo "  ✗ Server failed to start"
+    # Use global server and capture output
+    if ! kill -0 $GLOBAL_SERVER_PID 2>/dev/null; then
+        echo "  ✗ Global server not running"
         test_passed=0
     else
         echo "  ✓ Server started"
         
+        # Clear previous log entries and get current log size
+        local log_start=$(wc -l < /tmp/server_global.log 2>/dev/null || echo 0)
+        
         # Connect with valid signature (alice)
-        timeout 10 java Decryptor localhost 9005 alice > /dev/null 2>&1 || true
-        sleep 1
-        
-        # For signature failure test, we'll create a custom client that sends invalid signature
-        # Using a simple approach: try to decode the aes.key, tamper with a byte, 
-        # then sign it with alice's key (which will create a signature that doesn't match original encrypted key)
-        
-        # Alternative: just verify the output contains the success message from alice
-        # and that server continues running
+        timeout 10 java Decryptor localhost $GLOBAL_SERVER_PORT alice > /dev/null 2>&1 || true
         sleep 1
         
         # Check output contains required messages
-        local server_output=$(cat /tmp/server_tc7.log)
+        local server_output=$(tail -n +$((log_start + 1)) /tmp/server_global.log 2>/dev/null)
         
         if echo "$server_output" | grep -q "User alice connected"; then
             echo "  ✓ Output contains 'User alice connected'"
@@ -316,8 +318,6 @@ test_server_output_format() {
         fi
     fi
     
-    kill $SERVER_PID 2>/dev/null || true
-    
     print_result "TC-7: Server Display Output Format" $((1 - test_passed))
 }
 
@@ -329,22 +329,23 @@ main() {
     
     setup
     
+    # Start global server for tests that share it
+    start_global_server
+    
+    # Tests using global server (no cleanup between them)
     test_valid_signature
-    cleanup
-    
     test_invalid_signature
-    cleanup
+    test_multiple_clients
+    test_server_output_format
     
+    # Stop global server before tests that need their own
+    stop_global_server
+    
+    # Tests that start/stop their own servers (test specific functionality)
     test_port_binding
     cleanup
     
     test_server_restart
-    cleanup
-    
-    test_multiple_clients
-    cleanup
-    
-    test_server_output_format
     cleanup
     
     # Print summary
