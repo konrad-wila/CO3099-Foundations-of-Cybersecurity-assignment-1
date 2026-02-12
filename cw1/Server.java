@@ -114,6 +114,7 @@ public class Server {
                 System.out.println("Signature not verified.");
                 
                 // Send error response
+                // 0xFFFFFFFF
                 dos.writeInt(-1);
                 dos.flush();
             }
