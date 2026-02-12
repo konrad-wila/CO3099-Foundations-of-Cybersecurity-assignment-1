@@ -159,12 +159,15 @@ public class Server {
     }
     
     /**
-     * Load user's public key from userid.pub file (binary encoded key)
+     * Load user's public key from userid.pub file
      */
     private static PublicKey loadUserPublicKey(String userid) throws Exception {
         String keyFileName = userid + ".pub";
+        if (!Files.exists(Paths.get(keyFileName))) {
+            System.err.println("[ERROR] Public key file '" + keyFileName + "' for user '" + userid + "' not found.");
+            return null;
+        }
         
-        // Read binary encoded key
         byte[] keyBytes = Files.readAllBytes(Paths.get(keyFileName));
         X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");

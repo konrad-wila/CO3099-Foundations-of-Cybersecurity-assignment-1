@@ -57,12 +57,12 @@ public class Decryptor {
     }
     
     /**
-     * Load user's private key from userid.prv file (binary PKCS8 format)
+     * Load user's private key from userid.prv file
      */
     private static PrivateKey loadUserPrivateKey(String userid) throws Exception {
         String keyFileName = userid + ".prv";
         
-        // Read binary PKCS8 encoded key
+        // Read binary encoded key
         byte[] keyBytes = Files.readAllBytes(Paths.get(keyFileName));
         PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);
         KeyFactory keyFactory = KeyFactory.getInstance("RSA");
@@ -81,7 +81,6 @@ public class Decryptor {
         dos.write(encryptedAesKey);
         byte[] dataToSign = baos.toByteArray();
         
-        // Sign using SHA256withRSA
         Signature sig = Signature.getInstance("SHA256withRSA");
         sig.initSign(privateKey);
         sig.update(dataToSign);
@@ -127,6 +126,7 @@ public class Decryptor {
         System.out.println("Unfortunately we cannot verify your identity.");
         System.out.println("Please try again, making sure that you have the correct signature");
         System.out.println("key in place and have entered the correct userid.");
+        System.exit(1);
     }
 
     /**
